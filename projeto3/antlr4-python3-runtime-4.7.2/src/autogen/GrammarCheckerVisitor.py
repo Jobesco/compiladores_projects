@@ -179,6 +179,16 @@ class GrammarCheckerVisitor(ParseTreeVisitor):
                 if(return_type == Type.FLOAT):
                     token = ctx.identifier(i).IDENTIFIER().getPayload()
                     print('WARNING: possible loss of information assigning float expression to int variable \'{}\' in line {} and column {}'.format(str(ctx.identifier(i).getText()),str(token.line),str(token.column)))
+        
+        # ? para acessar o valor de float
+        elif(ctx.tyype().FLOAT() and ctx.expression()):
+            for i in range(len(ctx.expression())):
+                return_type, return_value = self.visitExpression(ctx.expression(i))
+
+                name = ctx.identifier(i).getText()
+                
+                # ? armazena a variável
+                self.ids_defined[name] = self.ids_defined.get(name)[0], return_value, self.ids_defined.get(name)[2] # ? 0 -> tyype ; 1 -> valor ; 2 -> funções q ela pertence
 
         # return self.visitChildren(ctx)
 
@@ -241,7 +251,7 @@ class GrammarCheckerVisitor(ParseTreeVisitor):
                     if(expr_type == Type.STRING and self.get_local_var_type(ctx.identifier().getText()) != Type.STRING):
                         token = ctx.identifier().IDENTIFIER().getPayload()
                         print("ERROR: trying to assign 'char *' expression to variable \'{}\' in line {} and column {}".format(str(ctx.identifier().getText()),str(token.line),str(token.column)))
-                        
+
     # Visit a parse tree produced by GrammarParser#expression.
     def visitExpression(self, ctx:GrammarParser.ExpressionContext):
         # ? verifica se existe operação com tipo void
@@ -252,7 +262,7 @@ class GrammarCheckerVisitor(ParseTreeVisitor):
                     print('ERROR: binary operator \'{}\' used on type void in line {} and column {}'.format(str(ctx.OP.text),str(token.line),str(token.column)))
 
         return_type = Type.VOID
-        return_var = 0
+        return_var = None
         # ? não tem expr em expr
         if len(ctx.expression()) == 0:
             if ctx.integer():
@@ -282,6 +292,9 @@ class GrammarCheckerVisitor(ParseTreeVisitor):
         elif len(ctx.expression()) == 1:
             if ctx.OP:
                 return_type, return_var = self.visit(ctx.expression(0))
+                if(ctx.OP.text == '-'):
+                    print('line {} Expression - {} simplified to: {}'.format(str(ctx.OP.line),str(return_var),str(-return_var)))
+                    return_var = -return_var
             else:
                 return_type, return_var = self.visit(ctx.expression(0))
         # ? tem duas expr nela
@@ -300,27 +313,31 @@ class GrammarCheckerVisitor(ParseTreeVisitor):
             # ? verificacao de valores
             token = ctx.OP
             output = 'line {} Expression {} {} {} simplified to: {}'
-            # TODO precedencia absoluta de parenteses
-            if(ctx.OP.text == '*' or ctx.OP.text == '/'):
-                if(ctx.OP.text == '*'):
-                    print(output.format(str(token.line),str(left_value),ctx.OP.text,str(right_value),str(left_value*right_value)))
-                    
-                    return_var = left_value * right_value
+            if(left_value != None and right_value != None):
+                if(ctx.OP.text == '*' or ctx.OP.text == '/'):
+                    if(ctx.OP.text == '*'):
+                        print(output.format(str(token.line),str(left_value),ctx.OP.text,str(right_value),str(left_value*right_value)))
+                        
+                        return_var = left_value * right_value
 
-                else:
-                    print(output.format(str(token.line),str(left_value),ctx.OP.text,str(right_value),str(left_value/right_value)))
-                    
-                    return_var = left_value / right_value
-            elif(ctx.OP.text == '+' or ctx.OP.text == '-'):
-                if(ctx.OP.text == '+'):
-                    print(output.format(str(token.line),str(left_value),ctx.OP.text,str(right_value),str(left_value+right_value)))
-                    
-                    return_var = left_value + right_value
+                    else:
+                        print(output.format(str(token.line),str(left_value),ctx.OP.text,str(right_value),str(left_value/right_value)))
+                        
+                        return_var = left_value / right_value
+                elif(ctx.OP.text == '+' or ctx.OP.text == '-'):
+                    if(ctx.OP.text == '+'):
+                        print(output.format(str(token.line),str(left_value),ctx.OP.text,str(right_value),str(left_value+right_value)))
+                        
+                        return_var = left_value + right_value
 
+                    else:
+                        print(output.format(str(token.line),str(left_value),ctx.OP.text,str(right_value),str(left_value-right_value)))
+                        
+                        return_var = left_value - right_value
                 else:
-                    print(output.format(str(token.line),str(left_value),ctx.OP.text,str(right_value),str(left_value-right_value)))
-                    
-                    return_var = left_value - right_value
+                    # * converte left e right em string, concatena c o OP e dá eval
+                    return_var = int(eval(str(left_value)+ctx.OP.text+str(right_value)))
+                    print(output.format(str(token.line),str(left_value),ctx.OP.text,str(right_value),str(return_var)))
         return return_type, return_var
 
 

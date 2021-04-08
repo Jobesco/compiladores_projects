@@ -8,14 +8,14 @@ int main () {
 
 	int c = a * b * - 1;
 
-	// int d = c * a + b * c - a;
+	int d = c * a + b * c - a;
 
-	// int e = a - b + c * -d;
+	int e = a - b + c * -d;
 
-	// if (e >= a + b + c) 
-	// 	d = 550;
+	if (e >= a + b + c) 
+	 d = 550;
 
-	// int f = a * b + c / d;
+	int f = a * b + c / d;
 
 	// int g = a + f;
 
