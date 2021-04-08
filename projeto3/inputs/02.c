@@ -17,7 +17,7 @@ int main () {
 
 	int f = a * b + c / d;
 
-	// int g = a + f;
+	int g = a + f;
 
 	return 0;
 }

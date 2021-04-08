@@ -47,6 +47,7 @@ class Type:
 class GrammarCheckerVisitor(ParseTreeVisitor):
     ids_defined = {} # Dicionário para armazenar as informações necessárias para cada identifier definido
     inside_what_function = "" # String que guarda a função atual que o visitor está visitando. Útil para acessar dados da função durante a visitação da árvore sintática da função.
+    in_bifurcation = False
 
     # Visit a parse tree produced by GrammarParser#fiile.
     def visitFiile(self, ctx:GrammarParser.FiileContext):
@@ -90,7 +91,9 @@ class GrammarCheckerVisitor(ParseTreeVisitor):
 
     # Visit a parse tree produced by GrammarParser#if_statement.
     def visitIf_statement(self, ctx:GrammarParser.If_statementContext):
-        return self.visitChildren(ctx)
+        self.in_bifurcation = True
+        self.visitChildren(ctx)
+        self.in_bifurcation = False
 
 
     # Visit a parse tree produced by GrammarParser#else_statement.
@@ -170,6 +173,7 @@ class GrammarCheckerVisitor(ParseTreeVisitor):
             # ? busca se existe expressão float
             for i in range(len(ctx.expression())):
                 return_type, return_value = self.visitExpression(ctx.expression(i))
+                if(self.in_bifurcation): return_value = None
 
                 name = ctx.identifier(i).getText()
                 
@@ -242,7 +246,13 @@ class GrammarCheckerVisitor(ParseTreeVisitor):
                             token = ctx.expression().array().identifier().IDENTIFIER().getPayload()
                             print("ERROR: array expression must be an integer, but it is float in line 50 and column 5".format(str(token.line),str(token.column)))
                     
-                    expr_type = self.visitExpression(ctx.expression())
+                    expr_type, return_value = self.visitExpression(ctx.expression())
+                    if(self.in_bifurcation): return_value = None
+
+                    name = ctx.identifier().getText()
+                
+                    # ? armazena a variável
+                    self.ids_defined[name] = self.ids_defined.get(name)[0], return_value, self.ids_defined.get(name)[2] # ? 0 -> tyype ; 1 -> valor ; 2 -> funções q ela pertence
                     
                     if(expr_type == Type.FLOAT and self.get_local_var_type(ctx.identifier().getText()) == Type.INT):
                         token = ctx.identifier().IDENTIFIER().getPayload()
