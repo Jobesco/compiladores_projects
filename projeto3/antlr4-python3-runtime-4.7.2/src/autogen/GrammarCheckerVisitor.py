@@ -62,6 +62,7 @@ class GrammarCheckerVisitor(ParseTreeVisitor):
         self.ids_defined[name] = tyype, params, None # ? 0 -> tyype ; 1 -> params
         self.inside_what_function = name
         self.visit(ctx.body())
+        self.inside_what_function = None # ! experimental
         return
 
 
@@ -108,35 +109,46 @@ class GrammarCheckerVisitor(ParseTreeVisitor):
 
     # Visit a parse tree produced by GrammarParser#for_initializer.
     def visitFor_initializer(self, ctx:GrammarParser.For_initializerContext):
-        return self.visitChildren(ctx)
+        self.in_bifurcation = True
+        self.visitChildren(ctx)
+        self.in_bifurcation = False
 
 
     # Visit a parse tree produced by GrammarParser#for_condition.
     def visitFor_condition(self, ctx:GrammarParser.For_conditionContext):
-        return self.visitChildren(ctx)
+        self.in_bifurcation = True
+        self.visitChildren(ctx)
+        self.in_bifurcation = False
 
 
     # Visit a parse tree produced by GrammarParser#for_step.
     def visitFor_step(self, ctx:GrammarParser.For_stepContext):
-        return self.visitChildren(ctx)
+        self.in_bifurcation = True
+        self.visitChildren(ctx)
+        self.in_bifurcation = False
 
 
     # Visit a parse tree produced by GrammarParser#variable_definition.
     def visitVariable_definition(self, ctx:GrammarParser.Variable_definitionContext):
+            
         # ? se atribuiu void em variavel
         for i in range(len(ctx.array())):
             tyype = ctx.tyype().getText()
             name = ctx.array(i).identifier().getText()
             array = [self.inside_what_function]
+            values = []
             
             if self.ids_defined.get(name): #se existe o array
                 if self.ids_defined.get(name)[2]: #se existe outro array c esse nome em outras funcoes
                     array = self.ids_defined.get(name)[2]
                     array.append(self.inside_what_function)
-            self.ids_defined[name] = tyype, None, array # ? 0 -> tyype ; 1 -> params ; 2 -> funções q ela pertence
 
             if(ctx.array_literal()):                
-                for k in range(len(ctx.array_literal(i).expression())):                    
+                for k in range(len(ctx.array_literal(i).expression())):
+
+                    ignore, return_value = self.visit(ctx.array_literal(i).expression(k))
+                    values.append(return_value)
+                        
                     if(ctx.tyype().getText() == Type.INT):
                         token = ctx.array(i).identifier().IDENTIFIER().getPayload()
                         
@@ -146,6 +158,10 @@ class GrammarCheckerVisitor(ParseTreeVisitor):
                         if(ctx.array_literal(i).expression(k).string()):
                             print("ERROR: trying to initialize 'char *' expression to 'int' array \'{}\' at index {} of array literal in line {} and column {}".format(str(ctx.array(i).identifier().getText()), str(k), str(token.line),str(token.column)))
         
+            # ? coloca os valores do array direitinho
+            self.ids_defined[name] = tyype, values, array # ? 0 -> tyype ; 1 -> params ; 2 -> funções q ela pertence
+
+
         for i in range(len(ctx.expression())):
             tyype = ctx.tyype().getText()
             name = ctx.identifier(i).getText()
@@ -177,8 +193,14 @@ class GrammarCheckerVisitor(ParseTreeVisitor):
 
                 name = ctx.identifier(i).getText()
                 
+                if(ctx.identifier()):
+                    for identifier in ctx.identifier():
+                        if(self.inside_what_function!=""):
+                            self.ids_defined[name] = self.ids_defined.get(name)[0], return_value, self.ids_defined.get(name)[2] # ? 0 -> tyype ; 1 -> valor ; 2 -> funções q ela pertence
+                        else:  
+                            self.ids_defined[name] = self.ids_defined.get(name)[0], None, self.ids_defined.get(name)[2] # ? 0 -> tyype ; 1 -> valor ; 2 -> funções q ela pertence
+
                 # ? armazena a variável
-                self.ids_defined[name] = self.ids_defined.get(name)[0], return_value, self.ids_defined.get(name)[2] # ? 0 -> tyype ; 1 -> valor ; 2 -> funções q ela pertence
 
                 if(return_type == Type.FLOAT):
                     token = ctx.identifier(i).IDENTIFIER().getPayload()
@@ -252,7 +274,7 @@ class GrammarCheckerVisitor(ParseTreeVisitor):
                     name = ctx.identifier().getText()
                 
                     # ? armazena a variável
-                    self.ids_defined[name] = self.ids_defined.get(name)[0], return_value, self.ids_defined.get(name)[2] # ? 0 -> tyype ; 1 -> valor ; 2 -> funções q ela pertence
+                    if(self.ids_defined.get(name)): self.ids_defined[name] = self.ids_defined.get(name)[0], return_value, self.ids_defined.get(name)[2] # ? 0 -> tyype ; 1 -> valor ; 2 -> funções q ela pertence
                     
                     if(expr_type == Type.FLOAT and self.get_local_var_type(ctx.identifier().getText()) == Type.INT):
                         token = ctx.identifier().IDENTIFIER().getPayload()
@@ -298,11 +320,12 @@ class GrammarCheckerVisitor(ParseTreeVisitor):
             elif ctx.array():
                 if self.ids_defined.get(ctx.array().identifier().getText()):
                     return_type = self.ids_defined.get(ctx.array().identifier().getText())[0]
+                    ignore, return_var = self.visit(ctx.array())
         # ? tem uma expr nela
         elif len(ctx.expression()) == 1:
             if ctx.OP:
                 return_type, return_var = self.visit(ctx.expression(0))
-                if(ctx.OP.text == '-'):
+                if(ctx.OP.text == '-' and return_var):
                     print('line {} Expression - {} simplified to: {}'.format(str(ctx.OP.line),str(return_var),str(-return_var)))
                     return_var = -return_var
             else:
@@ -353,7 +376,11 @@ class GrammarCheckerVisitor(ParseTreeVisitor):
 
     # Visit a parse tree produced by GrammarParser#array.
     def visitArray(self, ctx:GrammarParser.ArrayContext):
-        return self.visitChildren(ctx)
+        # print(self.ids_defined.get(ctx.identifier().getText()),'<<<<<<<<<<<<<<<<') #DEBUG
+        ignore, index = self.visit(ctx.expression())
+        # print('index',index) #DEBUG
+        return_var = self.ids_defined.get(ctx.identifier().getText())[1][index]
+        return 0, return_var
 
 
     # Visit a parse tree produced by GrammarParser#array_literal.
