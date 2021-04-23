@@ -13,17 +13,17 @@ float ResDiv(float k1, float k2)
 }
 
 
-// int main () {
-// 	int a = 8;
-// 	int b = 2;
+int main () {
+	int a = 8;
+	int b = 2;
 
-// 	splash(a);
+	splash(a);
 
-// 	float k1 = 50.0 * a;
-// 	float k2 = 150.0 * b;
-// 	float k = ResDiv(k1, k2);
+	float k1 = 50.0 * a;
+	float k2 = 150.0 * b;
+	float k = ResDiv(k1, k2);
 
-// 	int c = a / b;
-// 	c /= 3 * (2 - b) + 4;
-// 	return square(c + 1);
-// }
+	int c = a / b;
+	c /= 3 * (2 - b) + 4;
+	return square(c + 1);
+}

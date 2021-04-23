@@ -17,7 +17,6 @@ define float @ResDiv(float %0, float %1) {
 	store float %0, float* %k1, align 4
 	%k2 = alloca float, align 4
 	store float %1, float* %k2, align 4
-	
 	%k3 = alloca float, align 4
 	%3 = load float, float* %k1, align 4
 	%4 = load float, float* %k2, align 4
