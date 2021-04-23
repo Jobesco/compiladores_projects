@@ -12,3 +12,10 @@ define void @splash(i32 %0) {
 	ret void
 }
 
+define float @ResDiv(float %0, float %1) {
+	%k1 = alloca float, align 4
+	store float %0, float* %k1, align 4
+	%k2 = alloca float, align 4
+	store float %1, float* %k2, align 4
+}
+

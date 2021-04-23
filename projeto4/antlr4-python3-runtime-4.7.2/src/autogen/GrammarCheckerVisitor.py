@@ -491,7 +491,7 @@ class GrammarCheckerVisitor(ParseTreeVisitor):
             tyype = ctx.tyype(i).getText()
             name = ctx.identifier(i).getText()
             arguments.append((tyype, name, '%'+str(i))) # ? inclui a referência dele como parâmetro
-            if(i != 0): f.write(' ')
+            if(i != 0): f.write(', ')
             f.write(llvm_type(tyype)+' %'+str(i))
         return arguments 
 
