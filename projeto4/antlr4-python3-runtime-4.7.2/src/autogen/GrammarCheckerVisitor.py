@@ -115,7 +115,7 @@ class GrammarCheckerVisitor(ParseTreeVisitor):
         
                 if ctx.expression().identifier():
                     tyype, expr, ignore = self.ids_defined.get(ctx.expression().identifier().getText())
-                    print(self.ids_defined.get(ctx.expression().identifier().getText()), '<<<<<<<<<<<<<<<')
+                    # print(self.ids_defined.get(ctx.expression().identifier().getText()), '<<<<<<<<<<<<<<<') #DEBUG
                     # ? aloca um reg numerico p usar
                     self.param_number = self.param_number + 1
                     f.write('\t%' + str(self.param_number) + ' = load ' + llvm_type(tyype) + ', ' + llvm_type(tyype) + '* %' + ctx.expression().identifier().getText() + ', align 4\n')
@@ -257,7 +257,6 @@ class GrammarCheckerVisitor(ParseTreeVisitor):
                     token = ctx.identifier(i).IDENTIFIER().getPayload()
                     print('WARNING: possible loss of information assigning float expression to int variable \'{}\' in line {} and column {}'.format(str(ctx.identifier(i).getText()),str(token.line),str(token.column)))
         
-                #TODO terminar
                 if ctx.expression(i).identifier(): f.write('\tstore ' + llvm_type(return_type) + ' %' + str([*self.exists_used_regs(ctx.expression(i).getText())][0]) + ', ' + llvm_type(return_type) + '* ' + '%' + name + ', align 4\n')
                 elif ctx.expression(i).integer(): f.write('\tstore ' + llvm_type(return_type) + ' ' + str(return_value) + ', ' + llvm_type(return_type) + '* ' + '%' + str(ctx.identifier(i).getText()) + ', align 4\n')
 
@@ -277,8 +276,10 @@ class GrammarCheckerVisitor(ParseTreeVisitor):
 
                 # ? verifica se a variável ou expressão está armazenada num registrador numérico
                 #def exists_used_regs(self, var_expr): #{numero reg: (tipo, variavel/expressao)} [*left_reg][0]
-                if ctx.expression(i).identifier: f.write('\tstore ' + llvm_type(return_type) + ' %' + str([*self.exists_used_regs(ctx.expression(i).getText())][0]) + ', ' + llvm_type(return_type) + '* ' + '%' + name + ', align 4\n')
-                
+                if self.exists_used_regs(ctx.expression(i).getText()):
+                    if ctx.expression(i).identifier: f.write('\tstore ' + llvm_type(return_type) + ' %' + str([*self.exists_used_regs(ctx.expression(i).getText())][0]) + ', ' + llvm_type(return_type) + '* ' + '%' + name + ', align 4\n')
+                #TODO terminar
+
                 # ? se return_value for none, colocamos a expressão
                 if(return_value == None):
                     self.ids_defined[name] = self.ids_defined.get(name)[0], ctx.expression(i).getText(), self.ids_defined.get(name)[2]
@@ -377,6 +378,18 @@ class GrammarCheckerVisitor(ParseTreeVisitor):
                 return_type = Type.STRING
             elif ctx.function_call():
                 return_type = self.visit(ctx.function_call())
+                return_name = ctx.function_call().identifier().getText()
+                params = self.ids_defined.get(ctx.function_call().identifier().getText())[1] # ? (tipo, nome, nome registrador de variável)
+                
+                print(params, 'a<<<<<<<<<') #DEBUG
+                
+                f.write('\tcall ' + llvm_type(return_type) + ' @' + return_name + '(')
+                for i in range(len(params)):
+                    if i != 0: f.write(', ')
+                    f.write(llvm_type(params[i][0]) + ' ')
+                    # print(self.ids_defined.get()) #TODO terminar
+                f.write(')\n')
+
             elif ctx.identifier():
                 if (self.ids_defined.get(ctx.identifier().getText()) != None):
                     return_type = self.ids_defined.get(ctx.identifier().getText())[0]

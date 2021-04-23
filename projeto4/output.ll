@@ -32,4 +32,13 @@ define i32 @main() {
 	store i32 8, i32* %a, align 4
 	%b = alloca i32, align 4
 	store i32 2, i32* %b, align 4
+	call void @splash(i32 )
 	%k1 = alloca float, align 4
+	%k2 = alloca float, align 4
+	%k = alloca float, align 4
+	call float @ResDiv(float , float )
+	%c = alloca i32, align 4
+	%1 = load i32, i32* %a, align 4
+	%2 = load i32, i32* %b, align 4
+	%3 = fdiv i32 %1, %2
+	%4 = load i32, i32* %c, align 4
