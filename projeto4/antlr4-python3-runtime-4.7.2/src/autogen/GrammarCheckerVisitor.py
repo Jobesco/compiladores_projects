@@ -48,6 +48,8 @@ class GrammarCheckerVisitor(ParseTreeVisitor):
     ids_defined = {} # Dicionário para armazenar as informações necessárias para cada identifier definido
     inside_what_function = "" # String que guarda a função atual que o visitor está visitando. Útil para acessar dados da função durante a visitação da árvore sintática da função.
     in_bifurcation = False
+    param_number = 0 # ? numero de parametros que a funcao tem, para q n usemos seus devidos registradores
+    used_regs = {} # ? numero reg : (tipo, reg variavel associado)
 
     # Visit a parse tree produced by GrammarParser#fiile.
     def visitFiile(self, ctx:GrammarParser.FiileContext):
@@ -58,16 +60,41 @@ class GrammarCheckerVisitor(ParseTreeVisitor):
     def visitFunction_definition(self, ctx:GrammarParser.Function_definitionContext):
         tyype = ctx.tyype().getText()
         name = ctx.identifier().getText()
-        params = self.visit(ctx.arguments())
-        self.ids_defined[name] = tyype, params, None # ? 0 -> tyype ; 1 -> params
+        
+
+        f.write('define '+llvm_type(tyype)+' @'+name+'(')
+
         self.inside_what_function = name
+        params = self.visit(ctx.arguments())
+        self.param_number = len(params)
+        self.ids_defined[name] = tyype, params, None # ? 0 -> tyype ; 1 -> params
+
+        f.write(') {\n')
+        self.used_regs = {}
         self.visit(ctx.body())
-        self.inside_what_function = None # ! experimental
+        self.inside_what_function = None
+        self.param_number = 0
+        self.used_regs = {}
+
+        f.write('}\n\n')
         return
 
 
     # Visit a parse tree produced by GrammarParser#body.
     def visitBody(self, ctx:GrammarParser.BodyContext):
+        # ! primeirissima coisa: faz toda a alocação loucura lá pra cada parâmetro passado
+        params = self.ids_defined.get(self.inside_what_function)[1] # ? 0 -> tipo ; 1 -> nome ; 2 -> registrador
+        
+        for i in range(len(params)):
+            f.write('\t%' + params[i][1] + ' = alloca ' + llvm_type(params[i][0]) + ', align 4\n' )
+            f.write('\tstore ' + llvm_type(params[i][0]) + ' ' + params[i][2] + ', ' +  llvm_type(params[i][0]) + '* %' + params[i][1] + ', align 4\n' )
+
+            params[i] = (params[i][0], params[i][1], '%'+params[i][1])
+        
+        return_temp = self.ids_defined.get(self.inside_what_function)
+        return_temp = (return_temp[0] , params, return_temp[2])
+        self.ids_defined[self.inside_what_function] = return_temp
+
         return self.visitChildren(ctx)
 
 
@@ -75,15 +102,19 @@ class GrammarCheckerVisitor(ParseTreeVisitor):
     def visitStatement(self, ctx:GrammarParser.StatementContext):
         self.visitChildren(ctx)
         if(ctx.RETURN()):
-            if(ctx.expression().function_call()):
-                 # ? verifica se a expressão retornada é void
-                if(self.ids_defined[ctx.expression().function_call().identifier().getText()][0] == Type.VOID):
-                    token = ctx.RETURN().getPayload()
-                    print('ERROR: trying to return void expression from function \'{}\' in line {} and column {}'.format(str(self.inside_what_function),str(token.line),str(token.column)))
-                # ? se a função é float num return de int
-                elif(self.ids_defined.get(ctx.expression().function_call().identifier().getText())[0] == Type.FLOAT and self.ids_defined.get(self.inside_what_function)[0] == Type.INT):
-                    token = ctx.RETURN().getPayload()
-                    print('WARNING: possible loss of information returning float expression from int function \'{}\' in line {} and column {}'.format(self.inside_what_function,str(token.line),str(token.column)))
+            if(ctx.expression()):
+                if(ctx.expression().function_call()):
+                    # ? verifica se a expressão retornada é void
+                    if(self.ids_defined[ctx.expression().function_call().identifier().getText()][0] == Type.VOID):
+                        token = ctx.RETURN().getPayload()
+                        print('ERROR: trying to return void expression from function \'{}\' in line {} and column {}'.format(str(self.inside_what_function),str(token.line),str(token.column)))
+                    # ? se a função é float num return de int
+                    elif(self.ids_defined.get(ctx.expression().function_call().identifier().getText())[0] == Type.FLOAT and self.ids_defined.get(self.inside_what_function)[0] == Type.INT):
+                        token = ctx.RETURN().getPayload()
+                        print('WARNING: possible loss of information returning float expression from int function \'{}\' in line {} and column {}'.format(self.inside_what_function,str(token.line),str(token.column)))
+        
+            f.write('ret ')
+        
         # ? se a função void tiver return
         if(ctx.RETURN() and self.ids_defined[self.inside_what_function][0] == Type.VOID):
             token = ctx.RETURN().getPayload() # Obtém o token referente à uma determinada regra léxica (neste caso, IDENTIFIER)
@@ -188,7 +219,7 @@ class GrammarCheckerVisitor(ParseTreeVisitor):
         if(ctx.tyype().INT() and ctx.expression()):
             # ? busca se existe expressão float
             for i in range(len(ctx.expression())):
-                return_type, return_value = self.visitExpression(ctx.expression(i))
+                return_type, return_value, ignore = self.visitExpression(ctx.expression(i))
                 if(self.in_bifurcation): return_value = None
 
                 name = ctx.identifier(i).getText()
@@ -209,7 +240,7 @@ class GrammarCheckerVisitor(ParseTreeVisitor):
         # ? para acessar o valor de float
         elif(ctx.tyype().FLOAT() and ctx.expression()):
             for i in range(len(ctx.expression())):
-                return_type, return_value = self.visitExpression(ctx.expression(i))
+                return_type, return_value, ignore = self.visitExpression(ctx.expression(i))
 
                 name = ctx.identifier(i).getText()
                 
@@ -268,7 +299,7 @@ class GrammarCheckerVisitor(ParseTreeVisitor):
                             token = ctx.expression().array().identifier().IDENTIFIER().getPayload()
                             print("ERROR: array expression must be an integer, but it is float in line 50 and column 5".format(str(token.line),str(token.column)))
                     
-                    expr_type, return_value = self.visitExpression(ctx.expression())
+                    expr_type, return_value, ignore = self.visitExpression(ctx.expression())
                     if(self.in_bifurcation): return_value = None
 
                     name = ctx.identifier().getText()
@@ -286,6 +317,7 @@ class GrammarCheckerVisitor(ParseTreeVisitor):
 
     # Visit a parse tree produced by GrammarParser#expression.
     def visitExpression(self, ctx:GrammarParser.ExpressionContext):
+        # print(ctx.getText(), '<<<<<<<<<<<<<<<<<<<<<<<<') #DEBUG
         # ? verifica se existe operação com tipo void
         for i in range(len(ctx.expression())): #num = 2 + 3 -> 2 expressoes, 2 e 3
             if(ctx.expression(i).function_call()):
@@ -295,6 +327,7 @@ class GrammarCheckerVisitor(ParseTreeVisitor):
 
         return_type = Type.VOID
         return_var = None
+        return_name = None
         # ? não tem expr em expr
         if len(ctx.expression()) == 0:
             if ctx.integer():
@@ -311,11 +344,15 @@ class GrammarCheckerVisitor(ParseTreeVisitor):
                 if (self.ids_defined.get(ctx.identifier().getText()) != None):
                     return_type = self.ids_defined.get(ctx.identifier().getText())[0]
                     return_var = self.ids_defined.get(ctx.identifier().getText())[1]
+                    return_name = ctx.identifier().getText()
+                    print('estou passando pelo ctx.identifier em',self.inside_what_function) #DEBUG
                 elif (self.ids_defined.get(self.inside_what_function)[1] != None):
                     array = self.ids_defined.get(self.inside_what_function)[1]
                     for i in range(len(array)):
                         if(array[i][1] == ctx.identifier().getText()):
                             return_type = array[i][0]
+                            return_name = array[i][1]
+                            
                 else: return_type = Type.VOID
             elif ctx.array():
                 if self.ids_defined.get(ctx.array().identifier().getText()):
@@ -324,19 +361,19 @@ class GrammarCheckerVisitor(ParseTreeVisitor):
         # ? tem uma expr nela
         elif len(ctx.expression()) == 1:
             if ctx.OP:
-                return_type, return_var = self.visit(ctx.expression(0))
+                return_type, return_var, return_name = self.visit(ctx.expression(0))
                 if(ctx.OP.text == '-' and return_var):
                     print('line {} Expression - {} simplified to: {}'.format(str(ctx.OP.line),str(return_var),str(-return_var)))
                     return_var = -return_var
             else:
-                return_type, return_var = self.visit(ctx.expression(0))
+                return_type, return_var, return_name = self.visit(ctx.expression(0))
         # ? tem duas expr nela
-        elif len(ctx.expression()) == 2:  
-            # print(ctx.getText(),'expressao <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<') #DEBUG
+        elif len(ctx.expression()) == 2:
+            print(ctx.getText(),'expressao <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<') #DEBUG
 
-            left,left_value = self.visit(ctx.expression(0))
+            left,left_value, left_name = self.visit(ctx.expression(0))
 
-            right,right_value = self.visit(ctx.expression(1))
+            right,right_value, right_name = self.visit(ctx.expression(1))
 
             # ? verificacao de tipo
             if(left == Type.STRING or right == Type.STRING): return_type = Type.STRING
@@ -352,7 +389,6 @@ class GrammarCheckerVisitor(ParseTreeVisitor):
                         print(output.format(str(token.line),str(left_value),ctx.OP.text,str(right_value),str(left_value*right_value)))
                         
                         return_var = left_value * right_value
-
                     else:
                         print(output.format(str(token.line),str(left_value),ctx.OP.text,str(right_value),str(left_value/right_value)))
                         
@@ -371,7 +407,34 @@ class GrammarCheckerVisitor(ParseTreeVisitor):
                     # * converte left e right em string, concatena c o OP e dá eval
                     return_var = int(eval(str(left_value)+ctx.OP.text+str(right_value)))
                     print(output.format(str(token.line),str(left_value),ctx.OP.text,str(right_value),str(return_var)))
-        return return_type, return_var
+
+
+            if(ctx.OP.text == '*' or ctx.OP.text == '/'):
+                if(ctx.OP.text == '*'):
+                    if left_name == right_name: # ? operacao com mesmo nome
+                        # atribui valor a um registrador para receber o valor da variavel registrada
+                        self.param_number = self.param_number + 1
+                        f.write('\t%' + str(self.param_number) + ' = load ' + llvm_type(left) + ', ' + llvm_type(left) + '* %' + left_name + ', align 4\n')
+                        self.used_regs[self.param_number] = () # ? tipo, reg var associado
+
+                        # atribui a um registrador a multiplicação
+                        self.param_number = self.param_number + 1
+                        f.write('\t%' + str(self.param_number) + ' = mul ' + llvm_type(left) + ' %' + str(self.param_number - 1) + ', %' + str(self.param_number - 1) + '\n')
+
+                        # ! isso aqui é usado no 00.c na função square, se for modificar, se atente para o output discrepante
+
+                else:
+                    pass
+            elif(ctx.OP.text == '+' or ctx.OP.text == '-'):
+                if(ctx.OP.text == '+'):
+                    pass
+
+                else:
+                    pass
+            else:
+                pass
+
+        return return_type, return_var, return_name
 
 
     # Visit a parse tree produced by GrammarParser#array.
@@ -416,7 +479,9 @@ class GrammarCheckerVisitor(ParseTreeVisitor):
         for i in range(len(ctx.tyype())):
             tyype = ctx.tyype(i).getText()
             name = ctx.identifier(i).getText()
-            arguments.append((tyype, name))
+            arguments.append((tyype, name, '%'+str(i))) # ? inclui a referência dele como parâmetro
+            if(i != 0): f.write(' ')
+            f.write(llvm_type(tyype)+' %'+str(i))
         return arguments 
 
 
