@@ -49,7 +49,7 @@ class GrammarCheckerVisitor(ParseTreeVisitor):
     inside_what_function = "" # String que guarda a função atual que o visitor está visitando. Útil para acessar dados da função durante a visitação da árvore sintática da função.
     in_bifurcation = False
     param_number = 0 # ? numero de parametros que a funcao tem, para q n usemos seus devidos registradores
-    used_regs = {} # ? numero reg : (tipo, reg variavel associado)
+    used_regs = {} # ? numero reg : (tipo, reg variavel associado OU expressao associada)
 
     # Visit a parse tree produced by GrammarParser#fiile.
     def visitFiile(self, ctx:GrammarParser.FiileContext):
@@ -113,7 +113,16 @@ class GrammarCheckerVisitor(ParseTreeVisitor):
                         token = ctx.RETURN().getPayload()
                         print('WARNING: possible loss of information returning float expression from int function \'{}\' in line {} and column {}'.format(self.inside_what_function,str(token.line),str(token.column)))
         
-            f.write('ret ')
+                # ? armazena a expressão relacionada antes
+                # pega ela no retorno
+                for i, reg in enumerate(self.used_regs):
+                    temp = self.used_regs.get(reg)
+                    if temp[1] == ctx.expression().getText():
+                        print('achei')
+                        f.write('\tret ' + llvm_type(temp[0]) + ' %' + str(reg) + '\n')
+                        break
+            else:
+                f.write('\tret void\n')
         
         # ? se a função void tiver return
         if(ctx.RETURN() and self.ids_defined[self.inside_what_function][0] == Type.VOID):
@@ -369,7 +378,7 @@ class GrammarCheckerVisitor(ParseTreeVisitor):
                 return_type, return_var, return_name = self.visit(ctx.expression(0))
         # ? tem duas expr nela
         elif len(ctx.expression()) == 2:
-            print(ctx.getText(),'expressao <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<') #DEBUG
+            # print(ctx.getText(),'expressao <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<') #DEBUG
 
             left,left_value, left_name = self.visit(ctx.expression(0))
 
@@ -412,14 +421,16 @@ class GrammarCheckerVisitor(ParseTreeVisitor):
             if(ctx.OP.text == '*' or ctx.OP.text == '/'):
                 if(ctx.OP.text == '*'):
                     if left_name == right_name: # ? operacao com mesmo nome
-                        # atribui valor a um registrador para receber o valor da variavel registrada
+                        # atribui valor a um registrador numerico para receber o valor do registrador variavel
                         self.param_number = self.param_number + 1
                         f.write('\t%' + str(self.param_number) + ' = load ' + llvm_type(left) + ', ' + llvm_type(left) + '* %' + left_name + ', align 4\n')
-                        self.used_regs[self.param_number] = () # ? tipo, reg var associado
+                        self.used_regs[self.param_number] = (left, '%'+left_name) # ? tipo, reg var associado ou expressao associada
 
                         # atribui a um registrador a multiplicação
                         self.param_number = self.param_number + 1
                         f.write('\t%' + str(self.param_number) + ' = mul ' + llvm_type(left) + ' %' + str(self.param_number - 1) + ', %' + str(self.param_number - 1) + '\n')
+
+                        self.used_regs[self.param_number] = (left, ctx.getText()) # ? tipo, reg var associado ou expressao associada
 
                         # ! isso aqui é usado no 00.c na função square, se for modificar, se atente para o output discrepante
 

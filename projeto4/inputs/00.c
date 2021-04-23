@@ -2,15 +2,15 @@ int square (int x) {
 	return x * x;
 }
 
-// void splash (int k) {
-// 	return;
-// }
+void splash (int k) {
+	return;
+}
 
-// float ResDiv(float k1, float k2) 
-// {
-//     float k3 = k1 / (k1 + k2);
-//     return k3;
-// }
+float ResDiv(float k1, float k2) 
+{
+    float k3 = k1 / (k1 + k2);
+    return k3;
+}
 
 
 // int main () {
