@@ -50,6 +50,8 @@ class GrammarCheckerVisitor(ParseTreeVisitor):
     in_bifurcation = False
     param_number = 0 # ? numero de parametros que a funcao tem, para q n usemos seus devidos registradores
     used_regs = {} # ? numero reg : (tipo, reg variavel associado OU expressao associada)
+    in_return_function_check = False
+    dont_print = False
 
     # Visit a parse tree produced by GrammarParser#fiile.
     def visitFiile(self, ctx:GrammarParser.FiileContext):
@@ -100,10 +102,38 @@ class GrammarCheckerVisitor(ParseTreeVisitor):
 
     # Visit a parse tree produced by GrammarParser#statement.
     def visitStatement(self, ctx:GrammarParser.StatementContext):
+        # ? se o statement tiver um return, e nele, uma function call, a gt atribui o valor a um reg numerico e escreve :)
+        if(ctx.RETURN() and ctx.expression()):
+            if(ctx.expression().function_call()):
+                self.in_return_function_check = True
+                self.dont_print = True
+
         self.visitChildren(ctx)
+
+        if(ctx.RETURN() and ctx.expression()):
+            if(ctx.expression().function_call()):
+                self.in_return_function_check = False
+                self.dont_print = False
+
         if(ctx.RETURN()):
             if(ctx.expression()):
                 if(ctx.expression().function_call()):
+                    tyype, params, ignore = self.ids_defined.get(ctx.expression().function_call().identifier().getText())
+
+                    self.param_number = self.param_number + 1
+                    f.write('\t%' + str(self.param_number) + ' = call ' + llvm_type(tyype) + ' @' + ctx.expression().function_call().identifier().getText() + '(')
+                    for i in range(len(params)):
+                        self.in_return_function_check = True
+                        tyype, value, ignore = self.visit(ctx.expression().function_call().expression(i))
+                        self.in_return_function_check = False
+                        if i: f.write(' ' + llvm_type(params[i][0]) + ' ' + str(value))
+                        else: f.write(llvm_type(params[i][0]) + ' ' + str(value))
+                    f.write(')\n')
+
+                    self.used_regs[self.param_number] = (tyype, ctx.expression().getText())
+
+                    
+
                     # ? verifica se a expressão retornada é void
                     if(self.ids_defined[ctx.expression().function_call().identifier().getText()][0] == Type.VOID):
                         token = ctx.RETURN().getPayload()
@@ -230,6 +260,22 @@ class GrammarCheckerVisitor(ParseTreeVisitor):
                     print('ERROR: trying to assign \'char *\' expression to variable \'{}\' in line {} and column {}'.format(str(name),str(token.line),str(token.column)))
 
             if(ctx.expression(i).function_call()):
+                # ? se ele chama uma funcao nessa expressao
+                # %1 = call float @ResDiv(float 0x4079000000000000, float 0x4072c00000000000)
+                func_type, params, ignore = self.ids_defined.get(ctx.expression(i).function_call().identifier().getText())
+                self.param_number = self.param_number + 1
+                f.write('\t%' + str(self.param_number) + ' = call ' + llvm_type(func_type) + ' @' + ctx.expression(i).function_call().identifier().getText() + '(')
+
+                for j in range(len(params)):
+                    param_name = ctx.expression(i).function_call().expression(j).getText()
+                    ignore, param_value, ignore = self.ids_defined.get(param_name)
+                    if j: f.write(', ')
+                    f.write(llvm_type(params[j][0]) + ' ' + float_to_hex(param_value)) #hex de param_value
+
+                f.write(')\n')
+
+                f.write('\tstore ' + llvm_type(func_type) + ' %' + str(self.param_number) + ', ' + llvm_type(tyype) + '* %' + name + ', align 4\n')
+
                 if(self.ids_defined[ctx.expression(i).function_call().identifier().getText()][0] == Type.VOID):
                     token = ctx.identifier(i).IDENTIFIER().getPayload()
                     print('ERROR: trying to assign \'void\' expression to variable \'{}\' in line {} and column {}'.format(str(ctx.identifier(i).getText()),str(token.line),str(token.column)))
@@ -239,7 +285,9 @@ class GrammarCheckerVisitor(ParseTreeVisitor):
         if(ctx.tyype().INT() and ctx.expression()):
             # ? busca se existe expressão float
             for i in range(len(ctx.expression())):
+                self.dont_print = True
                 return_type, return_value, ignore = self.visitExpression(ctx.expression(i))
+                self.dont_print = False
                 if(self.in_bifurcation): return_value = None
 
                 name = ctx.identifier(i).getText()
@@ -259,6 +307,7 @@ class GrammarCheckerVisitor(ParseTreeVisitor):
         
                 if ctx.expression(i).identifier(): f.write('\tstore ' + llvm_type(return_type) + ' %' + str([*self.exists_used_regs(ctx.expression(i).getText())][0]) + ', ' + llvm_type(return_type) + '* ' + '%' + name + ', align 4\n')
                 elif ctx.expression(i).integer(): f.write('\tstore ' + llvm_type(return_type) + ' ' + str(return_value) + ', ' + llvm_type(return_type) + '* ' + '%' + str(ctx.identifier(i).getText()) + ', align 4\n')
+               
 
                 # ? se return_value for none, colocamos a expressão
                 if(return_value == None):
@@ -267,10 +316,11 @@ class GrammarCheckerVisitor(ParseTreeVisitor):
         # ? para acessar o valor de float
         elif(ctx.tyype().FLOAT() and ctx.expression()):
             for i in range(len(ctx.expression())):
+                self.dont_print = True
                 return_type, return_value, ignore = self.visitExpression(ctx.expression(i))
+                self.dont_print = False
 
                 name = ctx.identifier(i).getText()
-                
                 # ? armazena a variável
                 self.ids_defined[name] = self.ids_defined.get(name)[0], return_value, self.ids_defined.get(name)[2] # ? 0 -> tyype ; 1 -> valor/expressao ; 2 -> funções q ela pertence
 
@@ -279,11 +329,14 @@ class GrammarCheckerVisitor(ParseTreeVisitor):
                 if self.exists_used_regs(ctx.expression(i).getText()):
                     if ctx.expression(i).identifier: f.write('\tstore ' + llvm_type(return_type) + ' %' + str([*self.exists_used_regs(ctx.expression(i).getText())][0]) + ', ' + llvm_type(return_type) + '* ' + '%' + name + ', align 4\n')
                 #TODO terminar
-
+              
+               
                 # ? se return_value for none, colocamos a expressão
                 if(return_value == None):
                     self.ids_defined[name] = self.ids_defined.get(name)[0], ctx.expression(i).getText(), self.ids_defined.get(name)[2]
-                    
+                elif(ctx.expression(i).floating):
+                    f.write('\tstore ' + llvm_type(return_type) + ' ' + float_to_hex(return_value) + ', ' + llvm_type(return_type) + '* ' + '%' + str(ctx.identifier(i).getText()) + ', align 4\n')
+                
         # return self.visitChildren(ctx)
 
 
@@ -381,14 +434,23 @@ class GrammarCheckerVisitor(ParseTreeVisitor):
                 return_name = ctx.function_call().identifier().getText()
                 params = self.ids_defined.get(ctx.function_call().identifier().getText())[1] # ? (tipo, nome, nome registrador de variável)
                 
-                print(params, 'a<<<<<<<<<') #DEBUG
-                
-                f.write('\tcall ' + llvm_type(return_type) + ' @' + return_name + '(')
-                for i in range(len(params)):
-                    if i != 0: f.write(', ')
-                    f.write(llvm_type(params[i][0]) + ' ')
-                    # print(self.ids_defined.get()) #TODO terminar
-                f.write(')\n')
+                # print(params, 'a<<<<<<<<<') #DEBUG
+                if not self.dont_print:
+                    f.write('\tcall ' + llvm_type(return_type) + ' @' + return_name + '(')
+                    # print(params, '<<<<<<<<<<<<<<<') #DEBUG
+                    for i in range(len(params)):
+                        # print(ctx.function_call().expression(i).getText(), '<<<<<<<<<') #DEBUG
+                        value = 0 #TODO pegar valor se for identifier
+                        if self.ids_defined.get(ctx.function_call().expression(i).getText()):
+                            ignore, value, ignore = self.ids_defined.get(ctx.function_call().expression(i).getText())
+
+                        if i != 0: f.write(', ')
+                        if type(value) == float:
+                            f.write(llvm_type(params[i][0]) + ' ' + float_to_hex(value))
+                        else:
+                            f.write(llvm_type(params[i][0]) + ' ' + str(value))
+                        
+                    f.write(')\n')
 
             elif ctx.identifier():
                 if (self.ids_defined.get(ctx.identifier().getText()) != None):
@@ -461,91 +523,107 @@ class GrammarCheckerVisitor(ParseTreeVisitor):
                     return_var = int(eval(str(left_value)+ctx.OP.text+str(right_value)))
                     print(output.format(str(token.line),str(left_value),ctx.OP.text,str(right_value),str(return_var)))
 
+            # ? verificação se a expressão tá num parâmetro. se tiver, faz diferente :)
+            if(not self.in_return_function_check):
+                if(ctx.OP.text == '*' or ctx.OP.text == '/'):
+                    if(ctx.OP.text == '*'):
+                        if left_name == right_name: # ? operacao com mesmo nome
+                            #TODO fazer verificação feita depois
+                            # atribui valor a um registrador numerico para receber o valor do registrador variavel
+                            if( left_name != None ):
+                                left_reg = self.exists_used_regs(left_name) #{numero reg: (tipo, variavel/expressao)}
+                                if left_reg == None:
+                                    self.param_number = self.param_number + 1
+                                    f.write('\t%' + str(self.param_number) + ' = load ' + llvm_type(left) + ', ' + llvm_type(left) + '* %' + left_name + ', align 4\n')
+                                    self.used_regs[self.param_number] = (left, '%'+left_name) # ? tipo, reg var associado ou expressao associada
+                                    left_reg = {self.param_number: (left, '%'+left_name)}
+                                    # print('alocando',left_reg) #DEBUG
 
-            if(ctx.OP.text == '*' or ctx.OP.text == '/'):
-                if(ctx.OP.text == '*'):
-                    if left_name == right_name: # ? operacao com mesmo nome
-                        #TODO fazer verificação feita depois
-                        # atribui valor a um registrador numerico para receber o valor do registrador variavel
-                        left_reg = self.exists_used_regs(left_name) #{numero reg: (tipo, variavel/expressao)}
-                        if left_reg == None:
-                            self.param_number = self.param_number + 1
-                            f.write('\t%' + str(self.param_number) + ' = load ' + llvm_type(left) + ', ' + llvm_type(left) + '* %' + left_name + ', align 4\n')
-                            self.used_regs[self.param_number] = (left, '%'+left_name) # ? tipo, reg var associado ou expressao associada
-                            left_reg = {self.param_number: (left, '%'+left_name)}
-                            # print('alocando',left_reg) #DEBUG
+                                # atribui a um registrador a multiplicação
+                                self.param_number = self.param_number + 1
+                                f.write('\t%' + str(self.param_number) + ' = mul ' + llvm_type(left) + ' %' + str([*left_reg][0]) + ', %' + str([*left_reg][0]) + '\n')
 
-                        # atribui a um registrador a multiplicação
-                        self.param_number = self.param_number + 1
-                        f.write('\t%' + str(self.param_number) + ' = mul ' + llvm_type(left) + ' %' + str([*left_reg][0]) + ', %' + str([*left_reg][0]) + '\n')
+                                self.used_regs[self.param_number] = (left, ctx.getText()) # ? tipo, reg var associado ou expressao associada
 
-                        self.used_regs[self.param_number] = (left, ctx.getText()) # ? tipo, reg var associado ou expressao associada
+                                # ! isso aqui é usado no 00.c na função square, se for modificar, se atente para o output discrepante
 
-                        # ! isso aqui é usado no 00.c na função square, se for modificar, se atente para o output discrepante
-
-                else:
-                    if left_name == right_name:
-                        pass
                     else:
-                        left_reg = self.exists_used_regs(left_name) #{numero reg: (tipo, variavel/expressao)}
-                        if left_reg == None:
-                            self.param_number = self.param_number + 1
-                            f.write('\t%' + str(self.param_number) + ' = load ' + llvm_type(left) + ', ' + llvm_type(left) + '* %' + left_name + ', align 4\n')
-                            self.used_regs[self.param_number] = (left, '%'+left_name) # ? tipo, reg var associado ou expressao associada
-                            left_reg = {self.param_number: (left, left_name)}
+                        if left_name == right_name:
+                            pass
+                        else:
+                            
+                            if( left_name != None ):
+                                # print('estou crashando tentando achar',left_name) #DEBUG
+                                left_reg = self.exists_used_regs(left_name) #{numero reg: (tipo, variavel/expressao)}
+                                if left_reg == None:
+                                    self.param_number = self.param_number + 1
+                                    f.write('\t%' + str(self.param_number) + ' = load ' + llvm_type(left) + ', ' + llvm_type(left) + '* %' + left_name + ', align 4\n')
+                                    self.used_regs[self.param_number] = (left, '%'+left_name) # ? tipo, reg var associado ou expressao associada
+                                    left_reg = {self.param_number: (left, left_name)}
 
-                        # print('estou crashando tentando achar',right_name) #DEBUG
-                        right_reg = self.exists_used_regs(right_name)
-                        if right_reg == None:
-                            self.param_number = self.param_number + 1
-                            f.write('\t%' + str(self.param_number) + ' = load ' + llvm_type(right) + ', ' + llvm_type(right) + '* %' + right_name + ', align 4\n')
-                            self.used_regs[self.param_number] = (right, '%'+right_name) # ? tipo, reg var associado ou expressao associada
-                            right_reg = {self.param_number: (right, right_name)}
 
-                        # atribui a um registrador a multiplicação
-                        self.param_number = self.param_number + 1
-                        f.write('\t%' + str(self.param_number) + ' = fdiv ' + llvm_type(left) + ' %' + str([*left_reg][0]) + ', %' + str([*right_reg][0]) + '\n')
+                            if(right_name != None):
+                                right_reg = self.exists_used_regs(right_name)
+                                if right_reg == None:
+                                    self.param_number = self.param_number + 1
+                                    f.write('\t%' + str(self.param_number) + ' = load ' + llvm_type(right) + ', ' + llvm_type(right) + '* %' + right_name + ', align 4\n')
+                                    self.used_regs[self.param_number] = (right, '%'+right_name) # ? tipo, reg var associado ou expressao associada
+                                    right_reg = {self.param_number: (right, right_name)}
 
-                        self.used_regs[self.param_number] = (left, ctx.getText()) # ? tipo, reg var associado ou expressao associada
-            elif(ctx.OP.text == '+' or ctx.OP.text == '-'):
-                if(ctx.OP.text == '+'):
-                    if left_name == right_name:
-                        pass
+                            if(left_name != None and right_name != None):
+                                # atribui a um registrador a multiplicação
+                                self.param_number = self.param_number + 1
+                                f.write('\t%' + str(self.param_number) + ' = fdiv ' + llvm_type(left) + ' %' + str([*left_reg][0]) + ', %' + str([*right_reg][0]) + '\n')
+
+                                self.used_regs[self.param_number] = (left, ctx.getText()) # ? tipo, reg var associado ou expressao associada
+                elif(ctx.OP.text == '+' or ctx.OP.text == '-'):
+                    if(ctx.OP.text == '+'):
+                        if left_name == right_name:
+                            pass
+                        else:
+                            # print(ctx.getText(), '<<<<<<<<<<<<<<<<<<<<<') #DEBUG
+                            if(left_name != None):
+                                left_reg = self.exists_used_regs(left_name) #{numero reg: (tipo, variavel/expressao)}
+                                if left_reg == None:
+                                    self.param_number = self.param_number + 1
+                                    f.write('\t%' + str(self.param_number) + ' = load ' + llvm_type(left) + ', ' + llvm_type(left) + '* %' + left_name + ', align 4\n')
+                                    self.used_regs[self.param_number] = (left, '%'+left_name) # ? tipo, reg var associado ou expressao associada
+                                    left_reg = {self.param_number: (left, '%'+left_name)}
+                                    # print('alocando',left_reg) #DEBUG
+
+                            if(right_name != None):
+                                right_reg = self.exists_used_regs(right_name)
+                                # print(right_reg,'<<<<<<<<<<') #DEBUG
+                                if right_reg == None:
+                                    self.param_number = self.param_number + 1
+                                    f.write('\t%' + str(self.param_number) + ' = load ' + llvm_type(right) + ', ' + llvm_type(right) + '* %' + right_name + ', align 4\n')
+                                    self.used_regs[self.param_number] = (right, '%'+right_name) # ? tipo, reg var associado ou expressao associada
+                                    right_reg = {self.param_number: (right, '%'+right_name)}
+                                    # print('alocando',right_reg) #DEBUG
+
+                            if(left_name != None and right_name != None):
+                                # atribui a um registrador a multiplicação
+                                self.param_number = self.param_number + 1
+                                f.write('\t%' + str(self.param_number) + ' = fadd ' + llvm_type(left) + ' %' + str([*left_reg][0]) + ', %' + str([*right_reg][0]) + '\n')
+
+                                self.used_regs[self.param_number] = (left, ctx.getText()) # ? tipo, reg var associado ou expressao associada
+                            else:
+                                print('left_value = ',left_value) #DEBUG
+                                print('right_value = ',right_value) #DEBUG
+                                return_var = left_value + right_value # !
+
                     else:
-                        # print(ctx.getText(), '<<<<<<<<<<<<<<<<<<<<<') #DEBUG
-                        left_reg = self.exists_used_regs(left_name) #{numero reg: (tipo, variavel/expressao)}
-                        if left_reg == None:
-                            self.param_number = self.param_number + 1
-                            f.write('\t%' + str(self.param_number) + ' = load ' + llvm_type(left) + ', ' + llvm_type(left) + '* %' + left_name + ', align 4\n')
-                            self.used_regs[self.param_number] = (left, '%'+left_name) # ? tipo, reg var associado ou expressao associada
-                            left_reg = {self.param_number: (left, '%'+left_name)}
-                            # print('alocando',left_reg) #DEBUG
-
-                        right_reg = self.exists_used_regs(right_name)
-                        # print(right_reg,'<<<<<<<<<<') #DEBUG
-                        if right_reg == None:
-                            self.param_number = self.param_number + 1
-                            f.write('\t%' + str(self.param_number) + ' = load ' + llvm_type(right) + ', ' + llvm_type(right) + '* %' + right_name + ', align 4\n')
-                            self.used_regs[self.param_number] = (right, '%'+right_name) # ? tipo, reg var associado ou expressao associada
-                            right_reg = {self.param_number: (right, '%'+right_name)}
-                            # print('alocando',right_reg) #DEBUG
-
-                        # atribui a um registrador a multiplicação
-                        self.param_number = self.param_number + 1
-                        f.write('\t%' + str(self.param_number) + ' = fadd ' + llvm_type(left) + ' %' + str([*left_reg][0]) + ', %' + str([*right_reg][0]) + '\n')
-
-                        self.used_regs[self.param_number] = (left, ctx.getText()) # ? tipo, reg var associado ou expressao associada
-
+                        pass
                 else:
                     pass
-            else:
-                pass
 
         return return_type, return_var, return_name
 
     # ? verifica se a variável ou expressão está armazenada num registrador numérico
     def exists_used_regs(self, var_expr):
         return_reg = None
+        # if var_expr == None: return None # ! Bug fix
+        # print('var_expr é',var_expr) #DEBUG
         for i, reg in enumerate(self.used_regs):
             temp = self.used_regs.get(reg)
             # print('comparando o que quero {} com o que tenho {}'.format(str(var_expr),str(temp[1]))) #DEBUG
@@ -589,7 +667,9 @@ class GrammarCheckerVisitor(ParseTreeVisitor):
         elif ctx.expression():
             # * cada expression é um parametro
             for i in range(len(ctx.expression())):
+                self.in_return_check = True
                 expr_type = self.visitExpression(ctx.expression(i))
+                self.in_return_check = False
                 name = ctx.expression(i).getText()
                 # * busca o tipo esperado na declaracao da funcao
                 array = self.ids_defined.get(ctx.identifier().getText())[1]
